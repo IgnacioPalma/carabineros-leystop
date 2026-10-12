@@ -1,0 +1,65 @@
+name: scrape
+
+on:
+  schedule:
+    # Every 6 hours. During the initial backfill each run uses its full time
+    # budget; afterwards a run only does work when a new week is published.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      time_budget:
+        description: "Minutes to scrape before stopping cleanly"
+        default: "330"
+      weeks:
+        description: "Comma-separated semana ids to (re)scrape (empty = all missing)"
+        default: ""
+      refresh:
+        description: "Re-scrape weeks even if already stored"
+        type: boolean
+        default: false
+
+# Never run two scrapers at once: the site serialises these requests anyway,
+# and parallel clients are what gets an IP flagged by its WAF.
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write # keepalive step below
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_BUCKET: ${{ vars.R2_BUCKET }}
+      PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run pytest -q
+      - name: Scrape
+        env:
+          TIME_BUDGET: ${{ inputs.time_budget || '330' }}
+          WEEKS: ${{ inputs.weeks }}
+          REFRESH: ${{ inputs.refresh }}
+        run: |
+          args=(scrape --time-budget "$TIME_BUDGET")
+          if [ -n "$WEEKS" ]; then args+=(--weeks "$WEEKS"); fi
+          if [ "$REFRESH" = "true" ]; then args+=(--refresh); fi
+          uv run leystop "${args[@]}"
+      # GitHub disables scheduled workflows in public repos after 60 days without
+      # commits. Re-enabling through the API resets that timer.
+      - name: Keepalive
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/scrape.yml/enable"
