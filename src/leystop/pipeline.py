@@ -68,6 +68,13 @@ def fetch_comunas(client: Client) -> list[Comuna]:
     return out
 
 
+def load_comunas(store: Store) -> list[Comuna] | None:
+    blob = store.get(f"{PREFIX}comunas.parquet")
+    if not blob:
+        return None
+    return [Comuna(**row) for row in pl.read_parquet(io.BytesIO(blob)).to_dicts()]
+
+
 def semanas_frame(semanas: list[dict]) -> pl.DataFrame:
     return pl.DataFrame(
         {
@@ -256,6 +263,7 @@ def scrape(
     only_weeks: set[int] | None = None,
     refresh: bool = False,
     max_weeks: int | None = None,
+    refresh_catalogue: bool = False,
 ) -> int:
     """Scrape missing weeks, newest first. Returns the number of weeks completed."""
     deadline = time.time() + time_budget_s
@@ -270,8 +278,12 @@ def scrape(
     if not todo:
         return 0
 
-    comunas = fetch_comunas(client)
-    store.put(f"{PREFIX}comunas.parquet", _parquet_bytes(comunas_frame(comunas)), PARQUET, SHORT_CACHE)
+    # The catalogue is ~75 quick requests in a row, the burstiest part of a run, so
+    # reuse the stored copy (comunas change very rarely).
+    comunas = None if refresh_catalogue else load_comunas(store)
+    if comunas is None:
+        comunas = fetch_comunas(client)
+        store.put(f"{PREFIX}comunas.parquet", _parquet_bytes(comunas_frame(comunas)), PARQUET, SHORT_CACHE)
 
     completed = 0
     for s in todo:

@@ -46,15 +46,14 @@ class Client:
         max_retries: int = 5,
         user_agent: str = DEFAULT_USER_AGENT,
         proxy: str | None = None,
-        not_found_pause: float = 60.0,
-        max_not_found: int = 3,
+        min_gap: float = 3.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.min_interval = min_interval
-        self.not_found_pause = not_found_pause
-        self.max_not_found = max_not_found
+        self.min_gap = min_gap
         self.max_retries = max_retries
         self._last = 0.0
+        self._done = 0.0
         self.requests = 0
         self._http = httpx.Client(
             base_url=BASE_URL,
@@ -85,7 +84,7 @@ class Client:
         self.close()
 
     def _throttle(self) -> None:
-        wait = self._last + self.min_interval - time.monotonic()
+        wait = max(self._last + self.min_interval, self._done + self.min_gap) - time.monotonic()
         if wait > 0:
             time.sleep(wait)
         self._last = time.monotonic()
@@ -101,6 +100,7 @@ class Client:
                 "run from Chile or set LEYSTOP_PROXY to a proxy in Chile."
             ) from e
         self.requests += 1
+        self._done = time.monotonic()
         if _looks_blocked(r.text):
             raise Blocked("WAF challenge on landing page")
         self._warmed_up = True
@@ -109,7 +109,6 @@ class Client:
         if not self._warmed_up:
             self._warm_up()
         delay = 5.0
-        not_found = 0
         for attempt in range(1, self.max_retries + 1):
             self._throttle()
             try:
@@ -128,21 +127,13 @@ class Client:
                         log.warning("GET %s returned non-JSON body, attempt %d", path, attempt)
                 elif r.status_code == 429 or r.status_code >= 500:
                     log.warning("GET %s -> HTTP %d, attempt %d", path, r.status_code, attempt)
-                elif r.status_code == 404 and not_found < self.max_not_found:
-                    # The site sporadically 404s URLs that work moments later (seen on
-                    # valid comuna/provincia ids). Back off for longer, then retry.
-                    pause = self.not_found_pause * 2**not_found
-                    not_found += 1
-                    log.warning(
-                        "GET %s -> HTTP 404 (%r); pausing %.0fs before retry %d/%d",
-                        path, r.text[:120], pause, not_found, self.max_not_found,
-                    )
-                    time.sleep(pause)
-                    continue
                 else:
-                    # Repeated 404s or other 4xx on a URL the web app itself uses:
-                    # the WAF is likely suspicious. Stop rather than hammer it.
-                    raise Blocked(f"GET {path} -> HTTP {r.status_code}")
+                    # 404 (the WAF's own "URL cannot be found" page) or other 4xx on a
+                    # URL the web app itself uses: the WAF's rate control has kicked in
+                    # and the next step is a CAPTCHA. Stop and cool down; don't retry.
+                    raise Blocked(f"GET {path} -> HTTP {r.status_code}: {r.text[:100]!r}")
+            finally:
+                self._done = time.monotonic()
             time.sleep(delay)
             delay = min(delay * 2, 120)
         raise RuntimeError(f"GET {path} failed after {self.max_retries} attempts")

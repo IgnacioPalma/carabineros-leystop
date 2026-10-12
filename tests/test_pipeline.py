@@ -58,11 +58,13 @@ class FakeClient:
     def __init__(self, block_after=None):
         self.block_after = block_after
         self.stats_calls = 0
+        self.paths = []
         self.week = json.loads((FIX / "estadistica_199_13114.json").read_text())
 
     def get_json(self, path):
         from leystop.client import Blocked
 
+        self.paths.append(path)
         if path == "/api/semanas":
             return [{**s, "fecha_desde": "", "fecha_hasta": ""} for s in SEMANAS]
         if path == "/api/regiones":
@@ -95,6 +97,7 @@ def test_scrape_checkpoints_and_resumes(tmp_path):
     resumed = FakeClient()
     assert scrape(resumed, store, time_budget_s=3600) == 1
     assert resumed.stats_calls == 20  # only the comunas missing from the checkpoint
+    assert "/api/regiones" not in resumed.paths  # catalogue reused from the store
     assert scraped_weeks(store) == {1, 199}
     assert store.list(f"{PREFIX}raw/_partial/") == []
     m = build(store)

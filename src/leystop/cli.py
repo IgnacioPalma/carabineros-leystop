@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--max-weeks", type=int, help="stop after this many weeks")
     sp.add_argument("--refresh", action="store_true", help="re-scrape weeks even if already stored")
     sp.add_argument("--min-interval", type=float, default=1.5, help="seconds between request starts")
+    sp.add_argument("--min-gap", type=float, default=3.0, help="seconds to wait after each response")
+    sp.add_argument("--refresh-catalogue", action="store_true", help="re-download the comuna list")
 
     sub.add_parser("build", help="rebuild consolidated tables and manifest from weekly partitions")
 
@@ -51,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     ua = os.environ.get("LEYSTOP_USER_AGENT", DEFAULT_USER_AGENT)
     exit_code, completed = 0, 0
     proxy = os.environ.get("LEYSTOP_PROXY") or None
-    with Client(min_interval=args.min_interval, user_agent=ua, proxy=proxy) as client:
+    with Client(min_interval=args.min_interval, min_gap=args.min_gap, user_agent=ua, proxy=proxy) as client:
         try:
             completed = scrape(
                 client,
@@ -60,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
                 only_weeks=weeks,
                 refresh=args.refresh,
                 max_weeks=args.max_weeks,
+                refresh_catalogue=args.refresh_catalogue,
             )
         except Blocked as e:
             logging.error("blocked by the site's WAF (%s); stopping. Progress is checkpointed.", e)
