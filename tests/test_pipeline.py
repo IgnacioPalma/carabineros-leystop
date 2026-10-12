@@ -50,3 +50,52 @@ def test_resumen_and_build(tmp_path):
     assert res.sort("semana_id")["casos_ultima_semana"].to_list() == [147, 153]
     reg = pl.read_parquet(tmp_path / PREFIX / "registros.parquet")
     assert reg.height == 42
+
+
+class FakeClient:
+    """Serves fixture data for every comuna; raises Blocked after `block_after` stats calls."""
+
+    def __init__(self, block_after=None):
+        self.block_after = block_after
+        self.stats_calls = 0
+        self.week = json.loads((FIX / "estadistica_199_13114.json").read_text())
+
+    def get_json(self, path):
+        from leystop.client import Blocked
+
+        if path == "/api/semanas":
+            return [{**s, "fecha_desde": "", "fecha_hasta": ""} for s in SEMANAS]
+        if path == "/api/regiones":
+            return [{"id": 13, "nombre": "RM"}]
+        if path == "/api/regiones/13/provincias":
+            return [{"id": 131, "nombre": "SANTIAGO"}]
+        if path == "/api/provincias/131/comunas":
+            return [{"id": i, "nombre": f"C{i}"} for i in range(13101, 13131)]
+        assert path.startswith("/api/estadistica/") and "/COMUNA/" in path, path
+        if self.block_after is not None and self.stats_calls >= self.block_after:
+            raise Blocked("captcha")
+        self.stats_calls += 1
+        return self.week
+
+
+def test_scrape_checkpoints_and_resumes(tmp_path):
+    import pytest
+
+    from leystop.client import Blocked
+    from leystop.pipeline import PREFIX, build, scrape, scraped_weeks
+    from leystop.storage import LocalStore
+
+    store = LocalStore(tmp_path)
+    with pytest.raises(Blocked):
+        scrape(FakeClient(block_after=40), store, time_budget_s=3600)
+    # Newest week first: 30 comunas of week 199 done, then 10 of week 1 checkpointed.
+    assert scraped_weeks(store) == {199}
+    assert store.list(f"{PREFIX}raw/_partial/") == [f"{PREFIX}raw/_partial/semana_id=0001.jsonl.gz"]
+
+    resumed = FakeClient()
+    assert scrape(resumed, store, time_budget_s=3600) == 1
+    assert resumed.stats_calls == 20  # only the comunas missing from the checkpoint
+    assert scraped_weeks(store) == {1, 199}
+    assert store.list(f"{PREFIX}raw/_partial/") == []
+    m = build(store)
+    assert m["tables"]["registros"]["rows"] == 2 * 30 * 21

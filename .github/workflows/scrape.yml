@@ -17,6 +17,10 @@ on:
         description: "Re-scrape weeks even if already stored"
         type: boolean
         default: false
+      dry_run:
+        description: "Write to the runner's disk instead of R2 (smoke test)"
+        type: boolean
+        default: false
 
 # Never run two scrapers at once: the site serialises these requests anyway,
 # and parallel clients are what gets an IP flagged by its WAF.
@@ -51,8 +55,11 @@ jobs:
           TIME_BUDGET: ${{ inputs.time_budget || '330' }}
           WEEKS: ${{ inputs.weeks }}
           REFRESH: ${{ inputs.refresh }}
+          DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          args=(scrape --time-budget "$TIME_BUDGET")
+          args=()
+          if [ "$DRY_RUN" = "true" ]; then args+=(--local data); fi
+          args+=(scrape --time-budget "$TIME_BUDGET")
           if [ -n "$WEEKS" ]; then args+=(--weeks "$WEEKS"); fi
           if [ "$REFRESH" = "true" ]; then args+=(--refresh); fi
           uv run leystop "${args[@]}"
