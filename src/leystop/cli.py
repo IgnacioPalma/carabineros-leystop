@@ -50,7 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     weeks = {int(w) for w in args.weeks.split(",")} if args.weeks else None
     ua = os.environ.get("LEYSTOP_USER_AGENT", DEFAULT_USER_AGENT)
     exit_code, completed = 0, 0
-    with Client(min_interval=args.min_interval, user_agent=ua) as client:
+    proxy = os.environ.get("LEYSTOP_PROXY") or None
+    with Client(min_interval=args.min_interval, user_agent=ua, proxy=proxy) as client:
         try:
             completed = scrape(
                 client,

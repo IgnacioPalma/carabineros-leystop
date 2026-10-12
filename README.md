@@ -157,8 +157,16 @@ started manually from the Actions tab.
 | Secret | `R2_ACCOUNT_ID` | Cloudflare account id |
 | Secret | `R2_ACCESS_KEY_ID` | R2 API token, *Object Read & Write*, limited to the bucket |
 | Secret | `R2_SECRET_ACCESS_KEY` | Secret key of that token |
+| Secret | `LEYSTOP_PROXY` | HTTP(S) proxy in Chile, `http://user:pass@host:port` (see below) |
 | Variable | `R2_BUCKET` | `carabineros-leystop` |
 | Variable | `PUBLIC_BASE_URL` | `https://pub-e60eb7dae9d6498ea3e5abf4943b68a1.r2.dev` |
+
+### Network access
+
+`carabineros.cl` drops connections from outside Chile, including GitHub-hosted runners in
+the US. The scraper therefore sends its requests to the site through `LEYSTOP_PROXY`, a
+proxy with a Chilean IP. Uploads to R2 do not use the proxy. If you run the scraper from a
+machine in Chile, leave `LEYSTOP_PROXY` empty.
 
 ## License
 

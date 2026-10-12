@@ -42,6 +42,9 @@ jobs:
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       R2_BUCKET: ${{ vars.R2_BUCKET }}
       PUBLIC_BASE_URL: ${{ vars.PUBLIC_BASE_URL }}
+      # carabineros.cl is unreachable from GitHub-hosted runners (non-Chilean IPs),
+      # so requests to it go through a proxy located in Chile, e.g. http://user:pass@host:port
+      LEYSTOP_PROXY: ${{ secrets.LEYSTOP_PROXY }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

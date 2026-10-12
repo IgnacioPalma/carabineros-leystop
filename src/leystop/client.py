@@ -45,6 +45,7 @@ class Client:
         timeout: float = 120.0,
         max_retries: int = 5,
         user_agent: str = DEFAULT_USER_AGENT,
+        proxy: str | None = None,
     ) -> None:
         self.min_interval = min_interval
         self.max_retries = max_retries
@@ -53,6 +54,10 @@ class Client:
         self._http = httpx.Client(
             base_url=BASE_URL,
             timeout=timeout,
+            # carabineros.cl drops connections from non-Chilean / cloud IPs, so CI
+            # needs a proxy in Chile. Only this client uses it (R2 traffic does not).
+            proxy=proxy,
+            trust_env=False,
             follow_redirects=True,
             headers={
                 "User-Agent": user_agent,
@@ -82,7 +87,13 @@ class Client:
     def _warm_up(self) -> None:
         # Load the public page once, like a browser would, to get session cookies.
         self._throttle()
-        r = self._http.get("/estadistica/registros", headers={"Accept": "text/html"})
+        try:
+            r = self._http.get("/estadistica/registros", headers={"Accept": "text/html"})
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            raise ConnectionError(
+                f"cannot reach {BASE_URL} ({e!r}). The site blocks non-Chilean IPs; "
+                "run from Chile or set LEYSTOP_PROXY to a proxy in Chile."
+            ) from e
         self.requests += 1
         if _looks_blocked(r.text):
             raise Blocked("WAF challenge on landing page")
