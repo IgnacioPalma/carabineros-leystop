@@ -46,8 +46,13 @@ class Client:
         max_retries: int = 5,
         user_agent: str = DEFAULT_USER_AGENT,
         proxy: str | None = None,
+        not_found_pause: float = 60.0,
+        max_not_found: int = 3,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         self.min_interval = min_interval
+        self.not_found_pause = not_found_pause
+        self.max_not_found = max_not_found
         self.max_retries = max_retries
         self._last = 0.0
         self.requests = 0
@@ -58,6 +63,7 @@ class Client:
             # needs a proxy in Chile. Only this client uses it (R2 traffic does not).
             proxy=proxy,
             trust_env=False,
+            transport=transport,
             follow_redirects=True,
             headers={
                 "User-Agent": user_agent,
@@ -103,6 +109,7 @@ class Client:
         if not self._warmed_up:
             self._warm_up()
         delay = 5.0
+        not_found = 0
         for attempt in range(1, self.max_retries + 1):
             self._throttle()
             try:
@@ -121,9 +128,20 @@ class Client:
                         log.warning("GET %s returned non-JSON body, attempt %d", path, attempt)
                 elif r.status_code == 429 or r.status_code >= 500:
                     log.warning("GET %s -> HTTP %d, attempt %d", path, r.status_code, attempt)
+                elif r.status_code == 404 and not_found < self.max_not_found:
+                    # The site sporadically 404s URLs that work moments later (seen on
+                    # valid comuna/provincia ids). Back off for longer, then retry.
+                    pause = self.not_found_pause * 2**not_found
+                    not_found += 1
+                    log.warning(
+                        "GET %s -> HTTP 404 (%r); pausing %.0fs before retry %d/%d",
+                        path, r.text[:120], pause, not_found, self.max_not_found,
+                    )
+                    time.sleep(pause)
+                    continue
                 else:
-                    # 404 etc. on a URL the web app itself uses usually means the WAF
-                    # is getting suspicious. Do not hammer it.
+                    # Repeated 404s or other 4xx on a URL the web app itself uses:
+                    # the WAF is likely suspicious. Stop rather than hammer it.
                     raise Blocked(f"GET {path} -> HTTP {r.status_code}")
             time.sleep(delay)
             delay = min(delay * 2, 120)
