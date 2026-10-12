@@ -126,14 +126,16 @@ requests in parallel does not make it faster. The site is also behind a WAF. If 
 sends bursts of requests or requests unknown URLs, the WAF flags the client IP and shows a
 CAPTCHA. So the scraper:
 
-- sends requests one at a time, with a minimum gap between them;
+- sends requests one at a time and waits 3 seconds after each response (about 10 requests
+  per minute). Faster rates triggered the WAF within a few minutes;
+- reuses the stored comuna list instead of downloading it on every run;
 - only uses the URLs that the web app itself calls;
 - **stops immediately** when it gets a CAPTCHA or an unexpected error page. It keeps its
   checkpoint and tries again at the next scheduled run. It never tries to solve or bypass
   the CAPTCHA.
 
-Each week needs about 350 requests (about 20 minutes). The first full backfill of all
-weeks needs about 70,000 requests, which is about 3–4 days of scheduled runs.
+Each week needs about 350 requests (about 35 minutes). The first full backfill of all
+weeks needs about 70,000 requests, which is about 5 days of continuous running.
 
 ## Running it yourself
 
